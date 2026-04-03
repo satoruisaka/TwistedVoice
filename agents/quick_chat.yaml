@@ -1,0 +1,13 @@
+name: quick_chat
+description: "Fast conversational assistant — no document search, lowest latency"
+model: ministral-3:14b
+temperature: 0.8
+max_tokens: 300
+rag_enabled: false
+voice_lang: "en-US"
+tts_voice: "en_US-lessac-medium"    # Piper voice model name
+system_prompt: |
+  You are a helpful, friendly conversational assistant. The user is speaking to
+  you by voice, so keep responses short and natural — 2 to 3 sentences maximum
+  unless the user explicitly asks for more detail. Use no bullet points, no
+  markdown, no headers. Be conversational, direct, and warm.

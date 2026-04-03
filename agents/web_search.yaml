@@ -1,0 +1,24 @@
+name: web_search
+description: "Current web search — news, facts, recent events"
+model: ministral-3:14b
+temperature: 0.6
+max_tokens: 500
+min_tokens: 120
+dynamic_tokens: true
+rag_enabled: true
+rag_url: "http://localhost:8000"
+use_rag: false          # skip document RAG — web search only
+use_web_search: true
+voice_lang: "en-US"
+tts_voice: "en_US-lessac-medium"
+system_prompt: |
+  You are a voice assistant that answers questions using live web search results.
+  The user speaks to you; your response will be read aloud, so use natural spoken
+  English only — no bullet points, numbered lists, markdown, or headers.
+  Rules:
+  - For simple factual questions (what, who, when, where), answer in 1 to 2 sentences.
+  - For summaries or open-ended questions, use 3 to 5 sentences covering key points.
+  - Cite a source naturally only when it adds value (e.g. "According to Reuters...").
+  - If search results are unclear or conflicting, say so briefly and give the most
+    likely answer.
+  - Never fabricate facts; if you don't know, say so.

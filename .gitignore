@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Environment & secrets
+.env
+key.pem
+cert.pem
+
+# Piper voice model files (large binaries — download on first run)
+models/*.onnx
+models/*.onnx.json
+
+# Whisper model cache
+~/.cache/huggingface/
