@@ -13,9 +13,12 @@ Endpoints:
 """
 import json
 import logging
+import os
 import re
+import threading
 import uuid
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -61,6 +64,84 @@ voice = VoiceManager()
 _history: Dict[str, List[dict]] = defaultdict(list)
 _tc_sessions: Dict[str, str] = {}  # voice session_id → TwistedCollab session_id
 MAX_HISTORY_TURNS = 20  # keep last N user+assistant pairs
+
+# ── TwistedCore integration ───────────────────────────────────────────────────
+_TWISTEDCORE_URL = os.getenv("TWISTEDCORE_URL", "http://localhost:8020")
+_VOICE_SESSIONS_DIR = Path("data/sessions")
+_VOICE_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
+_VOICE_INACTIVITY_SECONDS = 300  # 5 minutes
+_voice_inactivity_timers: Dict[str, threading.Timer] = {}
+
+
+def _notify_twistedcore(
+    event_type: str,
+    session_id: str,
+    source_path: str,
+    partial: bool = False,
+) -> None:
+    """Fire-and-forget POST to TwistedCore /observe. Never raises."""
+    try:
+        requests.post(
+            f"{_TWISTEDCORE_URL}/observe",
+            json={
+                "source": "TwistedVoice",
+                "event_type": event_type,
+                "session_id": session_id,
+                "source_path": source_path,
+                "partial": partial,
+            },
+            timeout=1.0,
+        )
+    except Exception:
+        pass  # TwistedCore being down must never affect TwistedVoice
+
+
+def _persist_voice_session(session_id: str, history: List[dict], agent_name: str) -> str:
+    """
+    Write (overwrite) a TwistedCollab-compatible JSON file for this voice session.
+    Returns the absolute path of the written file.
+    """
+    now = datetime.utcnow().isoformat()
+    messages = []
+    for turn in history:
+        messages.append({
+            "role": turn.get("role", "user"),
+            "content": turn.get("content", ""),
+            "timestamp": now,
+            "metadata": {},
+        })
+    data = {
+        "session_id": session_id,
+        "title": f"Voice/{agent_name} session",
+        "created_at": now,
+        "updated_at": now,
+        "settings": {"agent": agent_name},
+        "current_summary": "",
+        "messages": messages,
+    }
+    filepath = (_VOICE_SESSIONS_DIR / f"{session_id}.json").resolve()
+    filepath.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    return str(filepath)
+
+
+def _reset_voice_inactivity_timer(session_id: str, agent_name: str) -> None:
+    """(Re)start the inactivity timer for a non-RAG voice session."""
+    old = _voice_inactivity_timers.pop(session_id, None)
+    if old:
+        old.cancel()
+
+    def _on_inactivity() -> None:
+        _voice_inactivity_timers.pop(session_id, None)
+        hist = list(_history.get(session_id, []))
+        if not hist:
+            return
+        saved_path = _persist_voice_session(session_id, hist, agent_name)
+        _notify_twistedcore("inactivity", session_id, saved_path, partial=True)
+
+    timer = threading.Timer(_VOICE_INACTIVITY_SECONDS, _on_inactivity)
+    timer.daemon = True
+    timer.start()
+    _voice_inactivity_timers[session_id] = timer
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
@@ -352,6 +433,10 @@ async def chat(request: ChatRequest):
     # Trim to last MAX_HISTORY_TURNS pairs (2 messages per turn)
     if len(history) > MAX_HISTORY_TURNS * 2:
         _history[session_id] = history[-(MAX_HISTORY_TURNS * 2):]
+
+    # Persist non-RAG sessions and notify TwistedCore
+    if not agent.rag_enabled:
+        _reset_voice_inactivity_timer(session_id, agent.name)
 
     logger.info(f"[{agent.name}] Response ({len(response)} chars): {response[:80]!r}...")
     return ChatResponse(response=response, agent_name=agent.name, session_id=session_id)
